@@ -1,0 +1,101 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: buzz
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: buzz
+rules:
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: buzz
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: buzz
+subjects:
+- kind: ServiceAccount
+  name: buzz
+  namespace: {{ .Release.Namespace }}
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buzz
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: buzz
+      component: main
+  template:
+    metadata:
+      labels:
+        app: buzz
+        component: main
+    spec:
+      serviceAccountName: buzz
+      {{- if .Values.existingSecret }}
+      initContainers:
+        - name: replace
+          image: "docker.io/openstackhelm/ceph-config-helper:latest-ubuntu_jammy"
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            - |
+              for conffile in buzz.conf; do
+                sed -f <(kubectl get secret {{ .Values.existingSecret }} -o json | jq -r '.data | keys[] as $key | "s/\($key)/\(.[$key] | @base64d)/g"') \
+                    /etc/buzz_templates/${conffile} > /etc/buzz/${conffile}
+              done
+          volumeMounts:
+            - name: buzz-etc-templates
+              mountPath: /etc/buzz_templates
+              readOnly: true
+            - name: buzz-etc
+              mountPath: /etc/buzz
+              readOnly: false
+      {{- end }}
+      containers:
+        - name: main
+          image: "ubuntu:jammy"
+          imagePullPolicy: IfNotPresent
+          command:
+            - /bin/bash
+            - -c
+            - |
+              cat /etc/buzz/buzz.conf
+              sleep 3600
+          volumeMounts:
+            - name: buzz-etc
+              mountPath: /etc/buzz/buzz.conf
+              subPath: buzz.conf
+              readOnly: true
+      volumes:
+        {{- if .Values.existingSecret }}
+        - name: buzz-etc-templates
+          secret:
+            secretName: buzz-etc
+            defaultMode: 0444
+        - name: buzz-etc
+          emptyDir: {}
+        {{- else }}
+        - name: buzz-etc
+          secret:
+            secretName: buzz-etc
+            defaultMode: 0444
+        {{- end -}}

@@ -1,0 +1,24 @@
+{{- define "buzz.configmap.etc" }}
+{{- $configMapName := index . 0 }}
+{{- $envAll := index . 1 }}
+{{- with $envAll }}
+
+{{- if empty .Values.conf.buzz.database.connection -}}
+{{- $connection := tuple "oslo_db" "internal" "buzz" "mysql" . | include "helm-toolkit.endpoints.authenticated_endpoint_uri_lookup" -}}
+{{- $_ := set .Values.conf.buzz.database "connection" $connection -}}
+{{- end -}}
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $configMapName }}
+type: Opaque
+data:
+  buzz.conf: {{ include "helm-toolkit.utils.to_oslo_conf" .Values.conf.buzz | b64enc }}
+{{- end -}}
+{{- end -}}
+
+{{- if .Values.manifests.configmap_etc }}
+{{- list "buzz-etc" . | include "buzz.configmap.etc" }}
+{{- end -}}
